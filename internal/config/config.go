@@ -11,6 +11,13 @@ type Config struct {
 	LLM   LLMConfig   `json:"llm"`
 	Agent AgentConfig `json:"agent"`
 	Log   LogConfig   `json:"log"`
+	Web   WebConfig   `json:"web"`
+}
+
+// WebConfig Web 服务配置
+type WebConfig struct {
+	Enable bool   `json:"enable"`
+	Addr   string `json:"addr"`
 }
 
 // LogConfig 日志配置
@@ -50,6 +57,10 @@ func Load() (*Config, error) {
 			Dir:       "log",
 			Level:     "INFO",
 			ToConsole: false,
+		},
+		Web: WebConfig{
+			Enable: true,
+			Addr:   ":8080",
 		},
 	}
 

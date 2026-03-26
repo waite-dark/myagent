@@ -107,6 +107,17 @@ func (a *Agent) RunInteractive(ctx context.Context) error {
 
 // Chat 处理单次对话（支持多轮工具调用）
 func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
+	return a.ChatWithEvents(ctx, userMessage, nil)
+}
+
+// ChatWithEvents 处理单次对话，通过回调发送中间事件
+func (a *Agent) ChatWithEvents(ctx context.Context, userMessage string, onEvent func(Event)) (string, error) {
+	emit := func(e Event) {
+		if onEvent != nil {
+			onEvent(e)
+		}
+	}
+
 	logger.Infof("用户输入: %s", userMessage)
 	a.history = append(a.history, model.Message{
 		Role:    "user",
@@ -121,6 +132,8 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
 			return "", ctx.Err()
 		default:
 		}
+
+		emit(Event{Type: EventThinking})
 
 		logger.Debugf("LLM 请求: turn=%d, messages=%d", turn, len(a.history))
 		resp, err := a.llm.Chat(ctx, a.history, toolDefs)
@@ -140,6 +153,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
 		if len(choice.Message.ToolCalls) == 0 {
 			logger.Infof("LLM 响应: %s", truncate(choice.Message.Content, 200))
 			a.trimHistory()
+			emit(Event{Type: EventAssistant, Content: choice.Message.Content})
 			return choice.Message.Content, nil
 		}
 
@@ -148,6 +162,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
 		for _, tc := range choice.Message.ToolCalls {
 			fmt.Printf("    → %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
 			logger.Infof("工具调用: %s args=%s", tc.Function.Name, tc.Function.Arguments)
+			emit(Event{Type: EventToolCall, Name: tc.Function.Name, Args: tc.Function.Arguments})
 
 			result, err := a.tools.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
 			if err != nil {
@@ -156,6 +171,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
 			} else {
 				logger.Debugf("工具 %s 结果: %s", tc.Function.Name, truncate(result, 200))
 			}
+			emit(Event{Type: EventToolResult, Name: tc.Function.Name, Result: result})
 
 			a.history = append(a.history, model.Message{
 				Role:       "tool",
@@ -165,7 +181,16 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) (string, error) {
 		}
 	}
 
-	return "达到最大工具调用轮次限制", nil
+	msg := "达到最大工具调用轮次限制"
+	emit(Event{Type: EventAssistant, Content: msg})
+	return msg, nil
+}
+
+// ClearHistory 清空对话历史
+func (a *Agent) ClearHistory() {
+	a.history = []model.Message{
+		{Role: "system", Content: a.systemPrompt},
+	}
 }
 
 // trimHistory 裁剪对话历史，保留 system 消息 + 最近 maxHistory 条

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -130,7 +131,7 @@ func (l *Logger) rotateIfNeeded() error {
 	return nil
 }
 
-func (l *Logger) log(level Level, format string, args ...any) {
+func (l *Logger) log(calldepth int, level Level, format string, args ...any) {
 	if level < l.level {
 		return
 	}
@@ -141,31 +142,41 @@ func (l *Logger) log(level Level, format string, args ...any) {
 
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
 	msg := fmt.Sprintf(format, args...)
-	l.logger.Printf("%s [%s] %s", ts, level, msg)
+
+	// 获取调用者的文件名和行号
+	_, file, line, ok := runtime.Caller(calldepth)
+	if ok {
+		file = filepath.Base(file)
+	} else {
+		file = "???"
+		line = 0
+	}
+
+	l.logger.Printf("%s [%s] %s:%d %s", ts, level, file, line, msg)
 }
 
 // --- 全局函数 ---
 
 func Debugf(format string, args ...any) {
 	if global != nil {
-		global.log(DEBUG, format, args...)
+		global.log(2, DEBUG, format, args...)
 	}
 }
 
 func Infof(format string, args ...any) {
 	if global != nil {
-		global.log(INFO, format, args...)
+		global.log(2, INFO, format, args...)
 	}
 }
 
 func Warnf(format string, args ...any) {
 	if global != nil {
-		global.log(WARN, format, args...)
+		global.log(2, WARN, format, args...)
 	}
 }
 
 func Errorf(format string, args ...any) {
 	if global != nil {
-		global.log(ERROR, format, args...)
+		global.log(2, ERROR, format, args...)
 	}
 }

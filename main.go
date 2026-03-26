@@ -13,6 +13,7 @@ import (
 	"myagent/internal/llm"
 	"myagent/internal/logger"
 	"myagent/internal/tool"
+	"myagent/internal/web"
 )
 
 func main() {
@@ -54,7 +55,7 @@ func main() {
 		SystemPrompt: cfg.Agent.SystemPrompt,
 	})
 
-	// 优雅退出
+	// 退出
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -65,6 +66,17 @@ func main() {
 		fmt.Println("\n正在退出...")
 		cancel()
 	}()
+
+	// 启动 Web 服务
+	if cfg.Web.Enable {
+		webSrv := web.NewServer(ag, cfg.Web.Addr)
+		go func() {
+			if err := webSrv.Start(ctx); err != nil {
+				logger.Errorf("Web 服务错误: %v", err)
+			}
+		}()
+		fmt.Printf("🌐 Web 界面已启动: http://localhost%s\n\n", cfg.Web.Addr)
+	}
 
 	// 启动交互式对话
 	if err := ag.RunInteractive(ctx); err != nil {

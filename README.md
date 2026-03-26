@@ -36,7 +36,7 @@ myagent/
 复制示例配置文件并填入你的 API Key：
 
 ```bash
-cp config.json.example config.json
+cp config.json config.json
 ```
 
 编辑 `config.json`，填入你的 LLM API Key。也可通过环境变量设置：

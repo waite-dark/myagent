@@ -1,0 +1,21 @@
+package agent
+
+// EventType 事件类型
+type EventType string
+
+const (
+	EventThinking   EventType = "thinking"
+	EventToolCall   EventType = "tool_call"
+	EventToolResult EventType = "tool_result"
+	EventAssistant  EventType = "assistant"
+	EventError      EventType = "error"
+)
+
+// Event Agent 事件
+type Event struct {
+	Type    EventType `json:"type"`
+	Content string    `json:"content,omitempty"`
+	Name    string    `json:"name,omitempty"`
+	Args    string    `json:"args,omitempty"`
+	Result  string    `json:"result,omitempty"`
+}
