@@ -19,6 +19,7 @@
     --error-bg: #3a1a1a;
     --border: #333;
     --radius: 12px;
+    --sidebar-w: 280px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -27,34 +28,126 @@
     color: var(--text);
     height: 100vh;
     display: flex;
-    flex-direction: column;
   }
+
+  /* ===== 侧边栏 ===== */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .sidebar-header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .btn-icon {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .btn-icon:hover { border-color: var(--primary); color: var(--primary); }
+
+  .agent-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .agent-list::-webkit-scrollbar { width: 4px; }
+  .agent-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+  .agent-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    transition: background 0.15s;
+  }
+  .agent-item:hover { background: var(--surface2); }
+  .agent-item.active { background: var(--primary); color: #fff; }
+  .agent-item .agent-name { font-size: 14px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-item .agent-model { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .agent-item.active .agent-model { color: rgba(255,255,255,0.7); }
+  .agent-item-info { flex: 1; min-width: 0; }
+  .agent-item-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
+  .agent-item:hover .agent-item-actions { opacity: 1; }
+  .agent-item.active .agent-item-actions { opacity: 1; }
+  .btn-sm {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .btn-sm:hover { color: var(--primary-light); background: rgba(255,255,255,0.1); }
+  .agent-item.active .btn-sm { color: rgba(255,255,255,0.7); }
+  .agent-item.active .btn-sm:hover { color: #fff; }
+
+  .empty-hint {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 40px 16px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  /* ===== 主区域 ===== */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
   header {
     background: var(--surface);
-    padding: 16px 24px;
+    padding: 14px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
+  .header-left { display: flex; align-items: center; gap: 12px; }
   header h1 {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
     background: linear-gradient(135deg, var(--primary), #e040fb);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
   .status {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-dim);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
   .status-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px; height: 7px;
     border-radius: 50%;
     background: #555;
     transition: background 0.3s;
@@ -72,6 +165,16 @@
     transition: all 0.2s;
   }
   .btn-clear:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* 未选择 Agent 的占位 */
+  .no-agent {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 15px;
+  }
 
   #chat {
     flex: 1;
@@ -96,37 +199,11 @@
   }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-  .msg.user {
-    align-self: flex-end;
-    background: var(--user-bg);
-    border: 1px solid #3a3a6a;
-  }
-  .msg.assistant {
-    align-self: flex-start;
-    background: var(--assistant-bg);
-    border: 1px solid #2e2e5e;
-  }
-  .msg.tool {
-    align-self: flex-start;
-    background: var(--tool-bg);
-    border: 1px solid #2a4a2a;
-    font-size: 13px;
-    font-family: 'Cascadia Code', 'Fira Code', monospace;
-  }
-  .msg.error {
-    align-self: flex-start;
-    background: var(--error-bg);
-    border: 1px solid #5a2a2a;
-    color: #ff6b6b;
-  }
-  .msg .label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-    display: block;
-  }
+  .msg.user { align-self: flex-end; background: var(--user-bg); border: 1px solid #3a3a6a; }
+  .msg.assistant { align-self: flex-start; background: var(--assistant-bg); border: 1px solid #2e2e5e; }
+  .msg.tool { align-self: flex-start; background: var(--tool-bg); border: 1px solid #2a4a2a; font-size: 13px; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  .msg.error { align-self: flex-start; background: var(--error-bg); border: 1px solid #5a2a2a; color: #ff6b6b; }
+  .msg .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: block; }
   .msg.user .label { color: var(--primary-light); }
   .msg.assistant .label { color: #4caf50; }
   .msg.tool .label { color: #ffa726; }
@@ -142,12 +219,7 @@
     gap: 8px;
   }
   .dot-pulse { display: flex; gap: 4px; }
-  .dot-pulse span {
-    width: 6px; height: 6px;
-    background: var(--primary);
-    border-radius: 50%;
-    animation: pulse 1.2s ease-in-out infinite;
-  }
+  .dot-pulse span { width: 6px; height: 6px; background: var(--primary); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
   .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
   .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.2); } }
@@ -190,59 +262,270 @@
   }
   #sendBtn:hover { background: var(--primary-light); }
   #sendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ===== 模态框 ===== */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 480px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: fadeIn 0.2s ease;
+  }
+  .modal h3 {
+    font-size: 17px;
+    margin-bottom: 20px;
+  }
+  .form-group {
+    margin-bottom: 16px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    width: 100%;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    border-color: var(--primary);
+  }
+  .form-group textarea { min-height: 80px; resize: vertical; }
+  .form-group select[multiple] { min-height: 100px; }
+  .form-group select option { padding: 4px 8px; }
+  .form-group .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-light); }
+  .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+  .btn-secondary:hover { border-color: var(--text-dim); color: var(--text); }
+  .btn-danger { background: #cc3333; color: #fff; }
+  .btn-danger:hover { background: #dd4444; }
 </style>
 </head>
 <body>
-  <header>
-    <h1>🤖 MyClaw AI</h1>
-    <div class="status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">未连接</span>
+
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Agents</h2>
+      <button class="btn-icon" onclick="openCreateModal()" title="新建 Agent">+</button>
     </div>
-    <div class="header-actions">
-      <button class="btn-clear" onclick="clearChat()">清空对话</button>
+    <div class="agent-list" id="agentList">
+      <div class="empty-hint">暂无 Agent<br>点击右上角 + 创建一个</div>
     </div>
-  </header>
-  <div id="chat"></div>
-  <div class="input-area">
-    <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
-    <button id="sendBtn" onclick="send()">发送</button>
   </div>
+
+  <!-- 主区域 -->
+  <div class="main">
+    <header>
+      <div class="header-left">
+        <h1 id="headerTitle">MyClaw AI</h1>
+        <div class="status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">未连接</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn-clear" onclick="clearChat()">清空对话</button>
+      </div>
+    </header>
+    <div class="no-agent" id="noAgent">选择左侧 Agent 开始对话，或创建一个新的 Agent</div>
+    <div id="chat" style="display:none;"></div>
+    <div class="input-area" id="inputArea" style="display:none;">
+      <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
+      <button id="sendBtn" onclick="send()">发送</button>
+    </div>
+  </div>
+
+  <!-- 创建/编辑 Agent 模态框 -->
+  <div class="modal-overlay" id="agentModal">
+    <div class="modal">
+      <h3 id="modalTitle">新建 Agent</h3>
+      <div class="form-group">
+        <label>Agent ID</label>
+        <input id="fId" placeholder="唯一标识，如 coder、translator" />
+        <div class="hint">创建后不可更改</div>
+      </div>
+      <div class="form-group">
+        <label>名称</label>
+        <input id="fName" placeholder="显示名称" />
+      </div>
+      <div class="form-group">
+        <label>模型</label>
+        <input id="fModel" placeholder="如 deepseek-chat、gpt-4o（留空使用默认）" />
+      </div>
+      <div class="form-group">
+        <label>System Prompt</label>
+        <textarea id="fPrompt" placeholder="设定 Agent 的角色和行为..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>最大工具调用轮次</label>
+        <input id="fMaxTurns" type="number" value="10" min="1" max="50" />
+      </div>
+      <div class="form-group">
+        <label>启用的工具</label>
+        <select id="fTools" multiple></select>
+        <div class="hint">按住 Ctrl 多选，不选则使用全部工具</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-danger" id="btnDelete" style="display:none;" onclick="deleteAgent()">删除</button>
+        <button class="btn btn-primary" id="btnSave" onclick="saveAgent()">创建</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function() {
-  const chat = document.getElementById('chat');
-  const input = document.getElementById('input');
-  const sendBtn = document.getElementById('sendBtn');
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
+  const $ = id => document.getElementById(id);
+  const chat = $('chat');
+  const input = $('input');
+  const sendBtn = $('sendBtn');
+  const statusDot = $('statusDot');
+  const statusText = $('statusText');
+  const agentList = $('agentList');
+  const headerTitle = $('headerTitle');
+  const noAgent = $('noAgent');
+  const inputArea = $('inputArea');
 
   let ws = null;
   let thinking = null;
   let busy = false;
+  let currentAgentId = null;
+  let agents = [];
+  let allTools = [];
+  let editingId = null; // null = 创建模式
 
-  function connect() {
+  // ===== API =====
+  async function api(path, method, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(path, opts);
+    return resp.json();
+  }
+
+  async function loadAgents() {
+    try {
+      agents = await api('/api/agents', 'GET');
+      if (!Array.isArray(agents)) agents = [];
+    } catch { agents = []; }
+    renderAgentList();
+  }
+
+  async function loadTools() {
+    try {
+      allTools = await api('/api/tools', 'GET');
+      if (!Array.isArray(allTools)) allTools = [];
+    } catch { allTools = []; }
+  }
+
+  // ===== Agent 列表渲染 =====
+  function renderAgentList() {
+    if (agents.length === 0) {
+      agentList.innerHTML = '<div class="empty-hint">暂无 Agent<br>点击右上角 + 创建一个</div>';
+      return;
+    }
+    agentList.innerHTML = agents.map(a => `
+      <div class="agent-item ${a.id === currentAgentId ? 'active' : ''}" onclick="selectAgent('${a.id}')">
+        <div class="agent-item-info">
+          <div class="agent-name">${esc(a.name || a.id)}</div>
+          <div class="agent-model">${esc(a.model || '默认模型')}</div>
+        </div>
+        <div class="agent-item-actions">
+          <button class="btn-sm" onclick="event.stopPropagation();openEditModal('${a.id}')" title="编辑">✏️</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ===== 选择 Agent =====
+  window.selectAgent = function(id) {
+    if (currentAgentId === id) return;
+    currentAgentId = id;
+    const ag = agents.find(a => a.id === id);
+    headerTitle.textContent = ag ? ag.name || ag.id : 'MyClaw AI';
+    noAgent.style.display = 'none';
+    chat.style.display = 'flex';
+    chat.innerHTML = '';
+    inputArea.style.display = 'flex';
+    renderAgentList();
+    connectWS(id);
+  };
+
+  // ===== WebSocket =====
+  function connectWS(agentId) {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    statusDot.classList.remove('connected');
+    statusText.textContent = '连接中...';
+    busy = false;
+    sendBtn.disabled = false;
+    removeThinking();
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws = new WebSocket(proto + '//' + location.host + '/ws?agent=' + encodeURIComponent(agentId));
 
     ws.onopen = () => {
       statusDot.classList.add('connected');
       statusText.textContent = '已连接';
     };
-
     ws.onclose = () => {
       statusDot.classList.remove('connected');
       statusText.textContent = '已断开';
       busy = false;
       sendBtn.disabled = false;
       removeThinking();
-      setTimeout(connect, 2000);
     };
-
     ws.onerror = () => {
       statusDot.classList.remove('connected');
       statusText.textContent = '连接错误';
     };
-
     ws.onmessage = (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
@@ -253,32 +536,23 @@
   function handleEvent(ev) {
     switch (ev.type) {
       case 'thinking':
-        showThinking();
-        break;
+        showThinking(); break;
       case 'tool_call':
         removeThinking();
         addMessage('tool', '🔧 调用工具: ' + ev.name + '\n参数: ' + ev.args);
-        showThinking();
-        break;
+        showThinking(); break;
       case 'tool_result':
         removeThinking();
         addMessage('tool', '📋 ' + ev.name + ' 返回:\n' + ev.result);
-        showThinking();
-        break;
+        showThinking(); break;
       case 'assistant':
         removeThinking();
         addMessage('assistant', ev.content);
-        busy = false;
-        sendBtn.disabled = false;
-        input.focus();
-        break;
+        busy = false; sendBtn.disabled = false; input.focus(); break;
       case 'error':
         removeThinking();
         addMessage('error', ev.content);
-        busy = false;
-        sendBtn.disabled = false;
-        input.focus();
-        break;
+        busy = false; sendBtn.disabled = false; input.focus(); break;
     }
   }
 
@@ -328,18 +602,116 @@
   };
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      window.send();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); window.send(); }
   });
-
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 120) + 'px';
   });
 
-  connect();
+  // ===== 模态框 =====
+  function populateToolSelect(selected) {
+    const sel = $('fTools');
+    sel.innerHTML = allTools.map(t =>
+      `<option value="${esc(t)}" ${selected && selected.includes(t) ? 'selected' : ''}>${esc(t)}</option>`
+    ).join('');
+  }
+
+  window.openCreateModal = function() {
+    editingId = null;
+    $('modalTitle').textContent = '新建 Agent';
+    $('fId').value = '';
+    $('fId').disabled = false;
+    $('fName').value = '';
+    $('fModel').value = '';
+    $('fPrompt').value = '';
+    $('fMaxTurns').value = '10';
+    $('btnSave').textContent = '创建';
+    $('btnDelete').style.display = 'none';
+    populateToolSelect(null);
+    $('agentModal').classList.add('open');
+  };
+
+  window.openEditModal = function(id) {
+    const ag = agents.find(a => a.id === id);
+    if (!ag) return;
+    editingId = id;
+    $('modalTitle').textContent = '编辑 Agent';
+    $('fId').value = ag.id;
+    $('fId').disabled = true;
+    $('fName').value = ag.name || '';
+    $('fModel').value = ag.model || '';
+    $('fPrompt').value = ag.system_prompt || '';
+    $('fMaxTurns').value = ag.max_turns || 10;
+    $('btnSave').textContent = '保存';
+    $('btnDelete').style.display = 'inline-block';
+    populateToolSelect(ag.tools);
+    $('agentModal').classList.add('open');
+  };
+
+  window.closeModal = function() {
+    $('agentModal').classList.remove('open');
+  };
+
+  window.saveAgent = async function() {
+    const id = $('fId').value.trim();
+    const name = $('fName').value.trim();
+    const model = $('fModel').value.trim();
+    const prompt = $('fPrompt').value.trim();
+    const maxTurns = parseInt($('fMaxTurns').value) || 10;
+    const toolSel = $('fTools');
+    const tools = Array.from(toolSel.selectedOptions).map(o => o.value);
+
+    if (!id) { alert('请输入 Agent ID'); return; }
+
+    const body = { id, name: name || id, model, system_prompt: prompt, max_turns: maxTurns, tools };
+
+    try {
+      if (editingId) {
+        await api('/api/agents/' + encodeURIComponent(editingId), 'PUT', body);
+      } else {
+        const resp = await api('/api/agents', 'POST', body);
+        if (resp.error) { alert(resp.error); return; }
+      }
+      closeModal();
+      await loadAgents();
+      // 如果编辑的是当前 Agent，重新连接
+      if (editingId && editingId === currentAgentId) {
+        selectAgent(editingId);
+      }
+    } catch (e) {
+      alert('保存失败: ' + e.message);
+    }
+  };
+
+  window.deleteAgent = async function() {
+    if (!editingId) return;
+    if (!confirm('确定要删除 Agent "' + editingId + '" 吗？')) return;
+    try {
+      await api('/api/agents/' + encodeURIComponent(editingId), 'DELETE');
+      closeModal();
+      if (currentAgentId === editingId) {
+        currentAgentId = null;
+        if (ws) { ws.onclose = null; ws.close(); ws = null; }
+        headerTitle.textContent = 'MyClaw AI';
+        chat.style.display = 'none';
+        inputArea.style.display = 'none';
+        noAgent.style.display = 'flex';
+        statusDot.classList.remove('connected');
+        statusText.textContent = '未连接';
+      }
+      await loadAgents();
+    } catch (e) {
+      alert('删除失败: ' + e.message);
+    }
+  };
+
+  // ===== 初始化 =====
+  async function init() {
+    await loadTools();
+    await loadAgents();
+  }
+  init();
 })();
 </script>
 </body>

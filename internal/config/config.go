@@ -8,10 +8,11 @@ import (
 
 // Config 应用配置
 type Config struct {
-	LLM   LLMConfig   `json:"llm"`
-	Agent AgentConfig `json:"agent"`
-	Log   LogConfig   `json:"log"`
-	Web   WebConfig   `json:"web"`
+	LLM    LLMConfig           `json:"llm"`
+	Agent  AgentConfig         `json:"agent"`
+	Agents []PresetAgentConfig `json:"agents"`
+	Log    LogConfig           `json:"log"`
+	Web    WebConfig           `json:"web"`
 }
 
 // WebConfig Web 服务配置
@@ -34,11 +35,21 @@ type LLMConfig struct {
 	Model   string `json:"model"`
 }
 
-// AgentConfig Agent 相关配置
+// AgentConfig Agent 相关配置（兼容旧配置）
 type AgentConfig struct {
 	Name         string `json:"name"`
 	SystemPrompt string `json:"system_prompt"`
 	MaxTurns     int    `json:"max_turns"`
+}
+
+// PresetAgentConfig 预配置的 Agent（在 config.json 的 agents 数组中定义）
+type PresetAgentConfig struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Model        string   `json:"model"`
+	SystemPrompt string   `json:"system_prompt"`
+	MaxTurns     int      `json:"max_turns"`
+	Tools        []string `json:"tools"`
 }
 
 // Load 加载配置，优先从配置文件读取，支持环境变量覆盖

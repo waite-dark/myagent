@@ -35,6 +35,11 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
 }
 
+// RegisterSilent 注册工具（不输出日志，用于构建子注册表）
+func (r *Registry) RegisterSilent(t Tool) {
+	r.tools[t.Name()] = t
+}
+
 // Get 获取工具
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.tools[name]

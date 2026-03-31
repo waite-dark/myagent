@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"net/http"
 	"sync"
@@ -31,13 +32,13 @@ type clientMessage struct {
 
 // Server Web 服务
 type Server struct {
-	ag   *agent.Agent
-	addr string
+	manager *agent.Manager
+	addr    string
 }
 
 // NewServer 创建 Web 服务
-func NewServer(ag *agent.Agent, addr string) *Server {
-	return &Server{ag: ag, addr: addr}
+func NewServer(manager *agent.Manager, addr string) *Server {
+	return &Server{manager: manager, addr: addr}
 }
 
 // Start 启动 HTTP 服务
@@ -51,7 +52,12 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	// WebSocket
+	// Agent CRUD API
+	mux.HandleFunc("/api/agents", s.handleAgents)
+	mux.HandleFunc("/api/agents/", s.handleAgent)
+	mux.HandleFunc("/api/tools", s.handleTools)
+
+	// WebSocket（通过 ?agent=<id> 指定 agent）
 	mux.HandleFunc("/ws", s.handleWS)
 
 	srv := &http.Server{Addr: s.addr, Handler: mux}
@@ -68,7 +74,93 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// ---------- REST API ----------
+
+func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.manager.AllToolNames())
+}
+
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.manager.ListConfigs())
+	case http.MethodPost:
+		var cfg agent.AgentConfig
+		if err := readBody(r, &cfg); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := s.manager.CreateAgent(&cfg); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, cfg)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
+	// 从路径 /api/agents/{id} 提取 id
+	id := r.URL.Path[len("/api/agents/"):]
+	if id == "" {
+		http.Error(w, "缺少 agent ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		cfg, ok := s.manager.GetConfig(id)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent 不存在"})
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+
+	case http.MethodPut:
+		var cfg agent.AgentConfig
+		if err := readBody(r, &cfg); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		cfg.ID = id
+		if err := s.manager.UpdateAgent(&cfg); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+
+	case http.MethodDelete:
+		if err := s.manager.DeleteAgent(id); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ---------- WebSocket ----------
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent")
+	if agentID == "" {
+		http.Error(w, "缺少 agent 参数", http.StatusBadRequest)
+		return
+	}
+
+	ag, ok := s.manager.GetAgent(agentID)
+	if !ok {
+		http.Error(w, "agent 不存在", http.StatusNotFound)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Errorf("WebSocket 升级失败: %v", err)
@@ -76,10 +168,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logger.Infof("WebSocket 客户端连接: %s", r.RemoteAddr)
+	logger.Infof("WebSocket 客户端连接: %s -> agent=%s", r.RemoteAddr, agentID)
 
 	var writeMu sync.Mutex
-	writeJSON := func(v interface{}) {
+	wsWriteJSON := func(v interface{}) {
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		conn.WriteJSON(v)
@@ -96,28 +188,45 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		var msg clientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			writeJSON(agent.Event{Type: agent.EventError, Content: "无效的消息格式"})
+			wsWriteJSON(agent.Event{Type: agent.EventError, Content: "无效的消息格式"})
 			continue
 		}
 
 		switch msg.Type {
 		case "clear":
-			s.ag.ClearHistory()
-			writeJSON(agent.Event{Type: agent.EventAssistant, Content: "对话历史已清空。"})
+			ag.ClearHistory()
+			wsWriteJSON(agent.Event{Type: agent.EventAssistant, Content: "对话历史已清空。"})
 
 		case "message":
 			if msg.Content == "" {
 				continue
 			}
-			_, err := s.ag.ChatWithEvents(r.Context(), msg.Content, func(e agent.Event) {
-				writeJSON(e)
+			_, err := ag.ChatWithEvents(r.Context(), msg.Content, func(e agent.Event) {
+				wsWriteJSON(e)
 			})
 			if err != nil {
-				writeJSON(agent.Event{Type: agent.EventError, Content: err.Error()})
+				wsWriteJSON(agent.Event{Type: agent.EventError, Content: err.Error()})
 			}
 
 		default:
-			writeJSON(agent.Event{Type: agent.EventError, Content: "未知的消息类型"})
+			wsWriteJSON(agent.Event{Type: agent.EventError, Content: "未知的消息类型"})
 		}
 	}
+}
+
+// ---------- Helpers ----------
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func readBody(r *http.Request, v interface{}) error {
+	defer r.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(r.Body, 1*1024*1024))
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
 }
