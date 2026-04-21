@@ -9,6 +9,10 @@
 
 # Config with secrets
 config.json
+agents.json
+
+# Agent history cache
+/cache/
 
 # IDE
 .idea/

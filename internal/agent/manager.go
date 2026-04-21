@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"myagent/internal/llm"
 	"myagent/internal/logger"
+	"myagent/internal/model"
 	"myagent/internal/tool"
 )
 
@@ -29,16 +31,20 @@ type Manager struct {
 	llmBase  llm.ClientConfig // LLM 基础配置（APIKey、BaseURL）
 	registry *tool.Registry
 	savePath string
+	cacheDir string // 对话历史缓存目录
 }
 
 // NewManager 创建 Agent 管理器
 func NewManager(llmBase llm.ClientConfig, registry *tool.Registry, savePath string) *Manager {
+	cacheDir := "cache"
+	os.MkdirAll(cacheDir, 0o755)
 	m := &Manager{
 		agents:   make(map[string]*Agent),
 		configs:  make(map[string]*AgentConfig),
 		llmBase:  llmBase,
 		registry: registry,
 		savePath: savePath,
+		cacheDir: cacheDir,
 	}
 	return m
 }
@@ -130,6 +136,9 @@ func (m *Manager) DeleteAgent(id string) error {
 	delete(m.agents, id)
 	delete(m.configs, id)
 
+	// 删除历史缓存文件
+	os.Remove(m.historyCachePath(id))
+
 	return m.saveToFileLocked()
 }
 
@@ -220,7 +229,16 @@ func (m *Manager) createAgent(cfg *AgentConfig) error {
 		Tools:        subRegistry,
 		MaxTurns:     cfg.MaxTurns,
 		SystemPrompt: cfg.SystemPrompt,
+		OnHistoryChanged: func() {
+			m.saveHistory(cfg.ID)
+		},
 	})
+
+	// 尝试恢复历史缓存
+	if history, err := m.loadHistory(cfg.ID); err == nil && len(history) > 0 {
+		ag.SetHistory(history)
+		logger.Infof("Agent [%s] 已恢复 %d 条历史记录", cfg.ID, len(history))
+	}
 
 	m.agents[cfg.ID] = ag
 	m.configs[cfg.ID] = cfg
@@ -244,4 +262,45 @@ func (m *Manager) saveToFileLocked() error {
 		return fmt.Errorf("写入 agent 配置文件失败: %w", err)
 	}
 	return nil
+}
+
+// ---------- 历史缓存 ----------
+
+func (m *Manager) historyCachePath(agentID string) string {
+	return filepath.Join(m.cacheDir, agentID+".json")
+}
+
+// saveHistory 保存指定 Agent 的对话历史
+func (m *Manager) saveHistory(agentID string) {
+	m.mu.RLock()
+	ag, ok := m.agents[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	history := ag.GetHistory()
+	data, err := json.Marshal(history)
+	if err != nil {
+		logger.Errorf("序列化 agent %s 历史失败: %v", agentID, err)
+		return
+	}
+
+	if err := os.WriteFile(m.historyCachePath(agentID), data, 0o644); err != nil {
+		logger.Errorf("保存 agent %s 历史缓存失败: %v", agentID, err)
+	}
+}
+
+// loadHistory 加载指定 Agent 的对话历史
+func (m *Manager) loadHistory(agentID string) ([]model.Message, error) {
+	data, err := os.ReadFile(m.historyCachePath(agentID))
+	if err != nil {
+		return nil, err
+	}
+
+	var history []model.Message
+	if err := json.Unmarshal(data, &history); err != nil {
+		return nil, err
+	}
+	return history, nil
 }

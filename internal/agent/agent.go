@@ -15,23 +15,25 @@ import (
 
 // Options Agent 配置选项
 type Options struct {
-	Name         string
-	LLM          llm.Client
-	Tools        *tool.Registry
-	MaxTurns     int
-	MaxHistory   int // 最大保留的历史消息条数（0 表示不限制）
-	SystemPrompt string
+	Name             string
+	LLM              llm.Client
+	Tools            *tool.Registry
+	MaxTurns         int
+	MaxHistory       int // 最大保留的历史消息条数（0 表示不限制）
+	SystemPrompt     string
+	OnHistoryChanged func() // 历史变更回调（用于持久化）
 }
 
 // Agent AI Agent
 type Agent struct {
-	name         string
-	llm          llm.Client
-	tools        *tool.Registry
-	maxTurns     int
-	maxHistory   int
-	systemPrompt string
-	history      []model.Message
+	name             string
+	llm              llm.Client
+	tools            *tool.Registry
+	maxTurns         int
+	maxHistory       int
+	systemPrompt     string
+	history          []model.Message
+	onHistoryChanged func()
 }
 
 // New 创建 Agent
@@ -41,12 +43,13 @@ func New(opts Options) *Agent {
 		maxHistory = 50
 	}
 	return &Agent{
-		name:         opts.Name,
-		llm:          opts.LLM,
-		tools:        opts.Tools,
-		maxTurns:     opts.MaxTurns,
-		maxHistory:   maxHistory,
-		systemPrompt: opts.SystemPrompt,
+		name:             opts.Name,
+		llm:              opts.LLM,
+		tools:            opts.Tools,
+		maxTurns:         opts.MaxTurns,
+		maxHistory:       maxHistory,
+		systemPrompt:     opts.SystemPrompt,
+		onHistoryChanged: opts.OnHistoryChanged,
 		history: []model.Message{
 			{Role: "system", Content: opts.SystemPrompt},
 		},
@@ -153,6 +156,7 @@ func (a *Agent) ChatWithEvents(ctx context.Context, userMessage string, onEvent 
 		if len(choice.Message.ToolCalls) == 0 {
 			logger.Infof("LLM 响应: %s", truncate(choice.Message.Content, 200))
 			a.trimHistory()
+			a.notifyHistoryChanged()
 			emit(Event{Type: EventAssistant, Content: choice.Message.Content})
 			return choice.Message.Content, nil
 		}
@@ -190,6 +194,26 @@ func (a *Agent) ChatWithEvents(ctx context.Context, userMessage string, onEvent 
 func (a *Agent) ClearHistory() {
 	a.history = []model.Message{
 		{Role: "system", Content: a.systemPrompt},
+	}
+	a.notifyHistoryChanged()
+}
+
+// GetHistory 获取当前对话历史（用于持久化）
+func (a *Agent) GetHistory() []model.Message {
+	return a.history
+}
+
+// SetHistory 恢复对话历史（从缓存加载）
+func (a *Agent) SetHistory(history []model.Message) {
+	if len(history) == 0 {
+		return
+	}
+	a.history = history
+}
+
+func (a *Agent) notifyHistoryChanged() {
+	if a.onHistoryChanged != nil {
+		a.onHistoryChanged()
 	}
 }
 
