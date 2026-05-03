@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Read(//c/Program Files/Go/**)",
+      "Read(//g//**)"
+    ]
+  }
+}

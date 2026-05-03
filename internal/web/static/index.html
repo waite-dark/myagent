@@ -922,6 +922,9 @@
 
 <script>
 (function() {
+  // 自动检测 basePath：去掉末尾的 /
+  const BASE_PATH = location.pathname.replace(/\/+$/, '') || '';
+
   const $ = id => document.getElementById(id);
   const chat = $('chat');
   const input = $('input');
@@ -941,6 +944,9 @@
   let allTools = [];
   let editingId = null;
 
+  let reconnectTimer = null;
+  let reconnectAttempt = 0;
+  let intentionalClose = false;
   // ===== Markdown 配置 =====
   if (typeof marked !== 'undefined') {
     const renderer = new marked.Renderer();
@@ -987,7 +993,7 @@
   async function api(path, method, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
-    const resp = await fetch(path, opts);
+    const resp = await fetch(BASE_PATH + path, opts);
     return resp.json();
   }
 
@@ -1058,7 +1064,10 @@
     chat.innerHTML = '';
     inputArea.style.display = 'block';
     renderAgentList();
+    clearTimeout(reconnectTimer);
+    intentionalClose = true;
     connectWS(id);
+    intentionalClose = false;
     // 移动端自动关闭侧边栏
     if (window.innerWidth <= 768) {
       $('sidebar').classList.remove('open');
@@ -1069,6 +1078,7 @@
   // ===== WebSocket =====
   function connectWS(agentId) {
     if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    clearTimeout(reconnectTimer);
     statusDot.classList.remove('connected');
     statusText.textContent = '连接中...';
     busy = false;
@@ -1076,18 +1086,24 @@
     removeThinking();
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws?agent=' + encodeURIComponent(agentId));
+    ws = new WebSocket(proto + '//' + location.host + BASE_PATH + '/ws?agent=' + encodeURIComponent(agentId));
 
     ws.onopen = () => {
       statusDot.classList.add('connected');
       statusText.textContent = '已连接';
+      reconnectAttempt = 0;
     };
     ws.onclose = () => {
-      statusDot.classList.remove('connected');
-      statusText.textContent = '已断开';
+      statusDot.classList.remove("connected");
       busy = false;
       sendBtn.disabled = false;
       removeThinking();
+      if (intentionalClose) { intentionalClose = false; return; }
+      var delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempt));
+      reconnectAttempt++;
+      statusText.textContent = '已断开，' + (delay / 1000) + 's 后重连...';
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(function() { if (currentAgentId) connectWS(currentAgentId); }, delay);
     };
     ws.onerror = () => {
       statusDot.classList.remove('connected');

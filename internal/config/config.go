@@ -4,6 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+)
+
+// 默认值常量
+const (
+	DefaultModel       = "gpt-4o"
+	DefaultBaseURL     = "https://api.openai.com/v1"
+	DefaultMaxTurns    = 10
+	DefaultMaxHistory  = 50
+	DefaultLogDir      = "log"
+	DefaultLogLevel       = "INFO"
+	DefaultWebAddr     = ":8080"
+	DefaultWebBasePath = "/myagent"
+	DefaultSystemPrompt   = "你是一个有用的 AI 助手。请用简洁、准确的方式回答问题。"
 )
 
 // Config 应用配置
@@ -17,8 +31,9 @@ type Config struct {
 
 // WebConfig Web 服务配置
 type WebConfig struct {
-	Enable bool   `json:"enable"`
-	Addr   string `json:"addr"`
+	Enable   bool   `json:"enable"`
+	Addr     string `json:"addr"`
+	BasePath string `json:"base_path"`
 }
 
 // LogConfig 日志配置
@@ -56,22 +71,23 @@ type PresetAgentConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		LLM: LLMConfig{
-			BaseURL: "https://api.openai.com/v1",
-			Model:   "gpt-4o",
+			BaseURL: DefaultBaseURL,
+			Model:   DefaultModel,
 		},
 		Agent: AgentConfig{
 			Name:         "MyClaw",
-			MaxTurns:     10,
-			SystemPrompt: "你是 MyClaw，一个有用的 AI 助手。你可以使用工具来帮助用户完成任务。请用简洁、准确的方式回答问题。",
+			MaxTurns:     DefaultMaxTurns,
+			SystemPrompt: "你是 MyClaw，" + DefaultSystemPrompt,
 		},
 		Log: LogConfig{
-			Dir:       "log",
-			Level:     "INFO",
+			Dir:       DefaultLogDir,
+			Level:     DefaultLogLevel,
 			ToConsole: false,
 		},
 		Web: WebConfig{
-			Enable: true,
-			Addr:   ":8080",
+			Enable:   true,
+			Addr:     DefaultWebAddr,
+			BasePath: DefaultWebBasePath,
 		},
 	}
 
@@ -98,4 +114,12 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// MaskKey 脱敏显示 API Key（仅保留前4后4字符）
+func MaskKey(key string) string {
+	if len(key) <= 8 {
+		return strings.Repeat("*", len(key))
+	}
+	return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
 }

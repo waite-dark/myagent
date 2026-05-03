@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -17,6 +18,9 @@ import (
 )
 
 func main() {
+	agentFlag := flag.String("agent", "", "CLI 模式下使用的 Agent ID（为空则使用第一个）")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
@@ -31,7 +35,12 @@ func main() {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 	defer logger.Close()
-	logger.Infof("MyClaw 启动, model=%s", cfg.LLM.Model)
+	logger.Infof("MyClaw 启动, model=%s, api_key=%s", cfg.LLM.Model, config.MaskKey(cfg.LLM.APIKey))
+
+	// 提醒优先使用环境变量
+	if os.Getenv("MYCLAW_API_KEY") == "" {
+		logger.Warnf("建议使用环境变量 MYCLAW_API_KEY 代替 config.json 中的明文 api_key")
+	}
 
 	// 注册全局工具
 	registry := tool.NewRegistry()
@@ -93,28 +102,42 @@ func main() {
 
 	// 启动 Web 服务
 	if cfg.Web.Enable {
-		webSrv := web.NewServer(manager, cfg.Web.Addr)
+		webSrv := web.NewServer(manager, cfg.Web.Addr, cfg.Web.BasePath)
 		go func() {
 			if err := webSrv.Start(ctx); err != nil {
 				logger.Errorf("Web 服务错误: %v", err)
 			}
 		}()
-		fmt.Printf("🌐 Web 界面已启动: http://localhost%s\n\n", cfg.Web.Addr)
+		fmt.Printf("🌐 Web 界面已启动: http://localhost%s%s\n\n", cfg.Web.Addr, cfg.Web.BasePath)
 	}
 
-	// 使用第一个 agent 启动交互式对话
+	// 启动交互式对话
 	configs := manager.ListConfigs()
 	if len(configs) > 0 {
-		if ag, ok := manager.GetAgent(configs[0].ID); ok {
-			if err := ag.RunInteractive(ctx); err != nil {
-				if ctx.Err() != nil {
-					os.Exit(0)
-				}
-				log.Fatalf("Agent 运行出错: %v", err)
+		targetID := configs[0].ID
+		if *agentFlag != "" {
+			targetID = *agentFlag
+		}
+		ag, ok := manager.GetAgent(targetID)
+		if !ok {
+			log.Fatalf("Agent %q 不存在，可用的 Agent: %v", targetID, agentIDs(configs))
+		}
+		if err := ag.RunInteractive(ctx); err != nil {
+			if ctx.Err() != nil {
+				os.Exit(0)
 			}
+			log.Fatalf("Agent 运行出错: %v", err)
 		}
 	}
 
 	// 等待退出信号
 	<-ctx.Done()
+}
+
+func agentIDs(configs []*agent.AgentConfig) []string {
+	ids := make([]string, len(configs))
+	for i, c := range configs {
+		ids[i] = c.ID
+	}
+	return ids
 }

@@ -115,7 +115,15 @@ func validateURL(rawURL string) error {
 		return fmt.Errorf("禁止访问本地地址")
 	}
 
-	// 解析 IP 地址（兼顾直接使用 IP 和域名解析后的 IP）
+	// 如果已经是 IP 地址，直接校验，避免 DNS 查询
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("禁止访问内网地址 %s", host)
+		}
+		return nil
+	}
+
+	// 域名则需要解析后再校验
 	ips, err := net.LookupHost(host)
 	if err != nil {
 		return fmt.Errorf("域名解析失败: %w", err)

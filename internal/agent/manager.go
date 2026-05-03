@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"myagent/internal/config"
 	"myagent/internal/llm"
 	"myagent/internal/logger"
 	"myagent/internal/model"
@@ -65,31 +66,18 @@ func (m *Manager) LoadFromFile() error {
 	}
 
 	for _, cfg := range configs {
-		if err := m.createAgent(cfg); err != nil {
+		if err := m.buildAgent(cfg); err != nil {
 			logger.Errorf("加载 agent %s 失败: %v", cfg.ID, err)
 		}
 	}
 	return nil
 }
 
-// SaveToFile 保存所有 Agent 配置到文件
+// SaveToFile 保存所有 Agent 配置到文件（线程安全）
 func (m *Manager) SaveToFile() error {
 	m.mu.RLock()
-	configs := make([]*AgentConfig, 0, len(m.configs))
-	for _, cfg := range m.configs {
-		configs = append(configs, cfg)
-	}
-	m.mu.RUnlock()
-
-	data, err := json.MarshalIndent(configs, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化 agent 配置失败: %w", err)
-	}
-
-	if err := os.WriteFile(m.savePath, data, 0o644); err != nil {
-		return fmt.Errorf("写入 agent 配置文件失败: %w", err)
-	}
-	return nil
+	defer m.mu.RUnlock()
+	return m.saveConfigs()
 }
 
 // CreateAgent 创建并注册新 Agent
@@ -101,11 +89,11 @@ func (m *Manager) CreateAgent(cfg *AgentConfig) error {
 		return fmt.Errorf("agent %q 已存在", cfg.ID)
 	}
 
-	if err := m.createAgent(cfg); err != nil {
+	if err := m.buildAgent(cfg); err != nil {
 		return err
 	}
 
-	return m.saveToFileLocked()
+	return m.saveConfigs()
 }
 
 // UpdateAgent 更新 Agent 配置（重建实例）
@@ -117,11 +105,11 @@ func (m *Manager) UpdateAgent(cfg *AgentConfig) error {
 		return fmt.Errorf("agent %q 不存在", cfg.ID)
 	}
 
-	if err := m.createAgent(cfg); err != nil {
+	if err := m.buildAgent(cfg); err != nil {
 		return err
 	}
 
-	return m.saveToFileLocked()
+	return m.saveConfigs()
 }
 
 // DeleteAgent 删除 Agent
@@ -139,7 +127,7 @@ func (m *Manager) DeleteAgent(id string) error {
 	// 删除历史缓存文件
 	os.Remove(m.historyCachePath(id))
 
-	return m.saveToFileLocked()
+	return m.saveConfigs()
 }
 
 // GetAgent 获取 Agent 实例
@@ -180,8 +168,8 @@ func (m *Manager) AllToolNames() []string {
 	return names
 }
 
-// createAgent 内部方法：创建 Agent 实例（调用方须持有锁）
-func (m *Manager) createAgent(cfg *AgentConfig) error {
+// buildAgent 内部方法：创建 Agent 实例（调用方须持有锁）
+func (m *Manager) buildAgent(cfg *AgentConfig) error {
 	if cfg.ID == "" {
 		return fmt.Errorf("agent ID 不能为空")
 	}
@@ -189,10 +177,10 @@ func (m *Manager) createAgent(cfg *AgentConfig) error {
 		cfg.Name = cfg.ID
 	}
 	if cfg.MaxTurns <= 0 {
-		cfg.MaxTurns = 10
+		cfg.MaxTurns = config.DefaultMaxTurns
 	}
 	if cfg.SystemPrompt == "" {
-		cfg.SystemPrompt = "你是一个有用的 AI 助手。请用简洁、准确的方式回答问题。"
+		cfg.SystemPrompt = config.DefaultSystemPrompt
 	}
 
 	// 根据配置的 model 创建 LLM 客户端
@@ -246,8 +234,8 @@ func (m *Manager) createAgent(cfg *AgentConfig) error {
 	return nil
 }
 
-// saveToFileLocked 保存到文件（调用方须持有锁）
-func (m *Manager) saveToFileLocked() error {
+// saveConfigs 写入配置文件（调用方须持有锁）
+func (m *Manager) saveConfigs() error {
 	configs := make([]*AgentConfig, 0, len(m.configs))
 	for _, cfg := range m.configs {
 		configs = append(configs, cfg)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	"myagent/internal/agent"
@@ -32,13 +33,18 @@ type clientMessage struct {
 
 // Server Web 服务
 type Server struct {
-	manager *agent.Manager
-	addr    string
+	manager  *agent.Manager
+	addr     string
+	basePath string
 }
 
 // NewServer 创建 Web 服务
-func NewServer(manager *agent.Manager, addr string) *Server {
-	return &Server{manager: manager, addr: addr}
+func NewServer(manager *agent.Manager, addr string, basePath string) *Server {
+	basePath = strings.TrimRight(basePath, "/")
+	if basePath != "" && !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+	return &Server{manager: manager, addr: addr, basePath: basePath}
 }
 
 // Start 启动 HTTP 服务
@@ -50,15 +56,15 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	mux.Handle(s.basePath+"/", http.StripPrefix(s.basePath, http.FileServer(http.FS(sub))))
 
 	// Agent CRUD API
-	mux.HandleFunc("/api/agents", s.handleAgents)
-	mux.HandleFunc("/api/agents/", s.handleAgent)
-	mux.HandleFunc("/api/tools", s.handleTools)
+	mux.HandleFunc(s.basePath+"/api/agents", s.handleAgents)
+	mux.HandleFunc(s.basePath+"/api/agents/", s.handleAgent)
+	mux.HandleFunc(s.basePath+"/api/tools", s.handleTools)
 
 	// WebSocket（通过 ?agent=<id> 指定 agent）
-	mux.HandleFunc("/ws", s.handleWS)
+	mux.HandleFunc(s.basePath+"/ws", s.handleWS)
 
 	srv := &http.Server{Addr: s.addr, Handler: mux}
 
@@ -67,7 +73,7 @@ func (s *Server) Start(ctx context.Context) error {
 		srv.Close()
 	}()
 
-	logger.Infof("Web 服务启动: http://%s", s.addr)
+	logger.Infof("Web 服务启动: http://%s%s", s.addr, s.basePath)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
@@ -105,8 +111,9 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
-	// 从路径 /api/agents/{id} 提取 id
-	id := r.URL.Path[len("/api/agents/"):]
+	// 从路径 {basePath}/api/agents/{id} 提取 id
+	prefix := s.basePath + "/api/agents/"
+	id := r.URL.Path[len(prefix):]
 	if id == "" {
 		http.Error(w, "缺少 agent ID", http.StatusBadRequest)
 		return

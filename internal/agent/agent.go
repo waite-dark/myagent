@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"myagent/internal/config"
 	"myagent/internal/llm"
 	"myagent/internal/logger"
 	"myagent/internal/model"
@@ -40,7 +41,7 @@ type Agent struct {
 func New(opts Options) *Agent {
 	maxHistory := opts.MaxHistory
 	if maxHistory <= 0 {
-		maxHistory = 50
+		maxHistory = config.DefaultMaxHistory
 	}
 	return &Agent{
 		name:             opts.Name,
