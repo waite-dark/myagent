@@ -21,6 +21,7 @@ type Options struct {
 	Tools            *tool.Registry
 	MaxTurns         int
 	MaxHistory       int // 最大保留的历史消息条数（0 表示不限制）
+	MaxTokens        int // token 预算上限（0 表示使用默认 4096）
 	SystemPrompt     string
 	OnHistoryChanged func() // 历史变更回调（用于持久化）
 }
@@ -32,6 +33,7 @@ type Agent struct {
 	tools            *tool.Registry
 	maxTurns         int
 	maxHistory       int
+	maxTokens        int
 	systemPrompt     string
 	history          []model.Message
 	onHistoryChanged func()
@@ -43,12 +45,17 @@ func New(opts Options) *Agent {
 	if maxHistory <= 0 {
 		maxHistory = config.DefaultMaxHistory
 	}
+	maxTokens := opts.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = config.DefaultMaxTokens
+	}
 	return &Agent{
 		name:             opts.Name,
 		llm:              opts.LLM,
 		tools:            opts.Tools,
 		maxTurns:         opts.MaxTurns,
 		maxHistory:       maxHistory,
+		maxTokens:        maxTokens,
 		systemPrompt:     opts.SystemPrompt,
 		onHistoryChanged: opts.OnHistoryChanged,
 		history: []model.Message{
@@ -89,7 +96,7 @@ func (a *Agent) RunInteractive(ctx context.Context) error {
 			a.history = []model.Message{
 				{Role: "system", Content: a.systemPrompt},
 			}
-			fmt.Println("对话历史已清空。\n")
+			fmt.Println("对话历史已清空。")
 			continue
 		case "/help":
 			printHelp()
@@ -191,6 +198,295 @@ func (a *Agent) ChatWithEvents(ctx context.Context, userMessage string, onEvent 
 	return msg, nil
 }
 
+// ChatSession 基于独立会话的对话（支持会话隔离）
+func (a *Agent) ChatSession(ctx context.Context, session *Session, userMessage string, onEvent func(Event)) (string, error) {
+	emit := func(e Event) {
+		if onEvent != nil {
+			onEvent(e)
+		}
+	}
+
+	logger.Infof("[session=%s] 用户输入: %s", session.ID, userMessage)
+	session.AddMessage(model.Message{Role: "user", Content: userMessage})
+
+	toolDefs := a.tools.Definitions()
+
+	for turn := 0; turn < a.maxTurns; turn++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		emit(Event{Type: EventThinking})
+
+		history := session.GetHistory()
+		logger.Debugf("[session=%s] LLM 请求: turn=%d, messages=%d", session.ID, turn, len(history))
+		resp, err := a.llm.Chat(ctx, history, toolDefs)
+		if err != nil {
+			logger.Errorf("LLM 调用失败: %v", err)
+			return "", fmt.Errorf("LLM 调用失败: %w", err)
+		}
+
+		if len(resp.Choices) == 0 {
+			return "", fmt.Errorf("LLM 返回空响应")
+		}
+
+		choice := resp.Choices[0]
+		session.AddMessage(choice.Message)
+
+		if len(choice.Message.ToolCalls) == 0 {
+			logger.Infof("[session=%s] LLM 响应: %s", session.ID, truncate(choice.Message.Content, 200))
+			// token 预算裁剪
+			a.trimSessionByTokens(ctx, session)
+			emit(Event{Type: EventAssistant, Content: choice.Message.Content})
+			return choice.Message.Content, nil
+		}
+
+		// 处理工具调用
+		for _, tc := range choice.Message.ToolCalls {
+			logger.Infof("[session=%s] 工具调用: %s args=%s", session.ID, tc.Function.Name, tc.Function.Arguments)
+			emit(Event{Type: EventToolCall, Name: tc.Function.Name, Args: tc.Function.Arguments})
+
+			result, err := a.tools.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+			if err != nil {
+				logger.Errorf("工具 %s 执行失败: %v", tc.Function.Name, err)
+				result = fmt.Sprintf("工具执行错误: %v", err)
+			} else {
+				logger.Debugf("工具 %s 结果: %s", tc.Function.Name, truncate(result, 200))
+			}
+			emit(Event{Type: EventToolResult, Name: tc.Function.Name, Result: result})
+
+			session.AddMessage(model.Message{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
+		}
+	}
+
+	msg := "达到最大工具调用轮次限制"
+	emit(Event{Type: EventAssistant, Content: msg})
+	return msg, nil
+}
+
+// ChatSessionStream 基于会话的流式对话
+func (a *Agent) ChatSessionStream(ctx context.Context, session *Session, userMessage string, onEvent func(Event)) (string, error) {
+	emit := func(e Event) {
+		if onEvent != nil {
+			onEvent(e)
+		}
+	}
+
+	logger.Infof("[session=%s] 用户输入(stream): %s", session.ID, userMessage)
+	session.AddMessage(model.Message{Role: "user", Content: userMessage})
+
+	toolDefs := a.tools.Definitions()
+
+	// 检查 LLM 客户端是否支持流式
+	streamer, supportsStream := a.llm.(llm.StreamClient)
+
+	for turn := 0; turn < a.maxTurns; turn++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
+		emit(Event{Type: EventThinking})
+		history := session.GetHistory()
+
+		// 如果支持流式，使用流式调用
+		if supportsStream {
+			var fullContent string
+			var toolCalls []model.ToolCall
+			var streamErr error
+
+			streamErr = streamer.ChatStream(ctx, history, toolDefs, func(chunk llm.StreamChunk) {
+				if chunk.Content != "" {
+					fullContent += chunk.Content
+					emit(Event{Type: EventStream, Content: chunk.Content})
+				}
+				if len(chunk.ToolCalls) > 0 {
+					toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
+				}
+			})
+			if streamErr != nil {
+				logger.Errorf("LLM 流式调用失败: %v", streamErr)
+				return "", fmt.Errorf("LLM 调用失败: %w", streamErr)
+			}
+
+			// 构建完整的 assistant 消息
+			assistantMsg := model.Message{
+				Role:      "assistant",
+				Content:   fullContent,
+				ToolCalls: toolCalls,
+			}
+			session.AddMessage(assistantMsg)
+
+			if len(toolCalls) == 0 {
+				logger.Infof("[session=%s] LLM 响应(stream): %s", session.ID, truncate(fullContent, 200))
+				a.trimSessionByTokens(ctx, session)
+				emit(Event{Type: EventStreamEnd, Content: fullContent})
+				return fullContent, nil
+			}
+
+			// 处理工具调用
+			for _, tc := range toolCalls {
+				logger.Infof("[session=%s] 工具调用: %s args=%s", session.ID, tc.Function.Name, tc.Function.Arguments)
+				emit(Event{Type: EventToolCall, Name: tc.Function.Name, Args: tc.Function.Arguments})
+
+				result, err := a.tools.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+				if err != nil {
+					logger.Errorf("工具 %s 执行失败: %v", tc.Function.Name, err)
+					result = fmt.Sprintf("工具执行错误: %v", err)
+				}
+				emit(Event{Type: EventToolResult, Name: tc.Function.Name, Result: result})
+				session.AddMessage(model.Message{Role: "tool", Content: result, ToolCallID: tc.ID})
+			}
+			continue
+		}
+
+		// 非流式 fallback
+		resp, err := a.llm.Chat(ctx, history, toolDefs)
+		if err != nil {
+			return "", fmt.Errorf("LLM 调用失败: %w", err)
+		}
+		if len(resp.Choices) == 0 {
+			return "", fmt.Errorf("LLM 返回空响应")
+		}
+
+		choice := resp.Choices[0]
+		session.AddMessage(choice.Message)
+
+		if len(choice.Message.ToolCalls) == 0 {
+			a.trimSessionByTokens(ctx, session)
+			emit(Event{Type: EventAssistant, Content: choice.Message.Content})
+			return choice.Message.Content, nil
+		}
+
+		for _, tc := range choice.Message.ToolCalls {
+			emit(Event{Type: EventToolCall, Name: tc.Function.Name, Args: tc.Function.Arguments})
+			result, err := a.tools.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+			if err != nil {
+				result = fmt.Sprintf("工具执行错误: %v", err)
+			}
+			emit(Event{Type: EventToolResult, Name: tc.Function.Name, Result: result})
+			session.AddMessage(model.Message{Role: "tool", Content: result, ToolCallID: tc.ID})
+		}
+	}
+
+	msg := "达到最大工具调用轮次限制"
+	emit(Event{Type: EventAssistant, Content: msg})
+	return msg, nil
+}
+
+// trimSessionByTokens 基于 token 预算裁剪会话历史，超出时触发摘要压缩
+func (a *Agent) trimSessionByTokens(ctx context.Context, session *Session) {
+	maxTokens := session.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = a.maxTokens
+	}
+
+	tokens := session.EstimateTokens()
+	if tokens <= maxTokens {
+		return
+	}
+
+	logger.Infof("[session=%s] token 超预算 (%d > %d)，执行摘要压缩", session.ID, tokens, maxTokens)
+
+	history := session.GetHistory()
+	if len(history) <= 3 {
+		return // 太少了不需要压缩
+	}
+
+	// 保留 system prompt (history[0]) 和最近的 N 条消息
+	// 对中间的旧消息进行摘要
+	keepRecent := len(history) / 3 // 保留最近 1/3 的消息
+	if keepRecent < 4 {
+		keepRecent = 4
+	}
+	if keepRecent >= len(history)-1 {
+		return
+	}
+
+	oldMessages := history[1 : len(history)-keepRecent]
+	recentMessages := history[len(history)-keepRecent:]
+
+	// 用 LLM 生成摘要
+	summary := a.summarizeMessages(ctx, oldMessages)
+
+	// 重建历史：system prompt + 摘要消息 + 最近消息
+	newHistory := make([]model.Message, 0, keepRecent+2)
+	newHistory = append(newHistory, history[0]) // system prompt
+	newHistory = append(newHistory, model.Message{
+		Role:    "system",
+		Content: "[对话历史摘要] " + summary,
+	})
+	newHistory = append(newHistory, recentMessages...)
+
+	session.SetHistory(newHistory)
+	logger.Infof("[session=%s] 摘要压缩完成: %d -> %d 条消息", session.ID, len(history), len(newHistory))
+}
+
+// summarizeMessages 用 LLM 生成历史消息摘要
+func (a *Agent) summarizeMessages(ctx context.Context, messages []model.Message) string {
+	// 构建摘要请求
+	var sb strings.Builder
+	for _, msg := range messages {
+		if msg.Role == "tool" {
+			sb.WriteString(fmt.Sprintf("[工具返回]: %s\n", truncate(msg.Content, 100)))
+		} else if msg.Role == "user" {
+			sb.WriteString(fmt.Sprintf("用户: %s\n", msg.Content))
+		} else if msg.Role == "assistant" {
+			sb.WriteString(fmt.Sprintf("助手: %s\n", truncate(msg.Content, 200)))
+		}
+	}
+
+	summarizePrompt := []model.Message{
+		{Role: "system", Content: "请将以下对话历史压缩为简洁的摘要，保留关键信息和上下文。摘要应该让AI能理解之前讨论过的内容。用中文回答，不超过300字。"},
+		{Role: "user", Content: sb.String()},
+	}
+
+	resp, err := a.llm.Chat(ctx, summarizePrompt, nil)
+	if err != nil {
+		logger.Errorf("生成摘要失败: %v", err)
+		// fallback：简单截取
+		return truncate(sb.String(), 300)
+	}
+	if len(resp.Choices) > 0 {
+		return resp.Choices[0].Message.Content
+	}
+	return truncate(sb.String(), 300)
+}
+
+// mergeToolCalls 合并流式返回的 tool call 增量
+func mergeToolCalls(existing []model.ToolCall, deltas []model.ToolCall) []model.ToolCall {
+	for _, d := range deltas {
+		found := false
+		for i := range existing {
+			if existing[i].ID == d.ID || (existing[i].ID == "" && i == len(existing)-1 && d.ID == "") {
+				existing[i].Function.Arguments += d.Function.Arguments
+				if d.Function.Name != "" {
+					existing[i].Function.Name = d.Function.Name
+				}
+				if d.ID != "" {
+					existing[i].ID = d.ID
+				}
+				if d.Type != "" {
+					existing[i].Type = d.Type
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			existing = append(existing, d)
+		}
+	}
+	return existing
+}
+
 // ClearHistory 清空对话历史
 func (a *Agent) ClearHistory() {
 	a.history = []model.Message{
@@ -230,6 +526,16 @@ func (a *Agent) trimHistory() {
 	a.history = trimmed
 }
 
+// GetSystemPrompt 获取系统提示词
+func (a *Agent) GetSystemPrompt() string {
+	return a.systemPrompt
+}
+
+// GetMaxTokens 获取 token 预算
+func (a *Agent) GetMaxTokens() int {
+	return a.maxTokens
+}
+
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -238,7 +544,7 @@ func truncate(s string, max int) string {
 }
 
 func printHelp() {
-	fmt.Println(`
+	fmt.Print(`
 可用命令:
   /help   显示帮助信息
   /clear  清空对话历史

@@ -8,6 +8,8 @@ const (
 	EventToolCall   EventType = "tool_call"
 	EventToolResult EventType = "tool_result"
 	EventAssistant  EventType = "assistant"
+	EventStream     EventType = "stream"     // 流式输出增量
+	EventStreamEnd  EventType = "stream_end" // 流式输出结束
 	EventError      EventType = "error"
 )
 

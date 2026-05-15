@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"myagent/internal/logger"
@@ -17,6 +19,18 @@ import (
 // Client LLM 客户端接口
 type Client interface {
 	Chat(ctx context.Context, messages []model.Message, tools []model.ToolDefinition) (*model.ChatResponse, error)
+}
+
+// StreamChunk 流式输出的单个块
+type StreamChunk struct {
+	Content   string           // 文本增量
+	ToolCalls []model.ToolCall // 工具调用增量
+}
+
+// StreamClient 支持流式输出的 LLM 客户端接口
+type StreamClient interface {
+	Client
+	ChatStream(ctx context.Context, messages []model.Message, tools []model.ToolDefinition, onChunk func(StreamChunk)) error
 }
 
 // ClientConfig LLM 客户端配置
@@ -147,4 +161,114 @@ func (e *retryableError) Unwrap() error { return e.err }
 func isRetryable(err error) bool {
 	_, ok := err.(*retryableError)
 	return ok
+}
+
+// ChatStream 流式调用 LLM（SSE）
+func (c *OpenAIClient) ChatStream(ctx context.Context, messages []model.Message, tools []model.ToolDefinition, onChunk func(StreamChunk)) error {
+	reqBody := model.ChatRequest{
+		Model:    c.model,
+		Messages: messages,
+		Stream:   true,
+	}
+	if len(tools) > 0 {
+		reqBody.Tools = tools
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := c.baseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+		return fmt.Errorf("API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk streamResponse
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			logger.Debugf("解析 stream chunk 失败: %v", err)
+			continue
+		}
+
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta
+		sc := StreamChunk{}
+		if delta.Content != "" {
+			sc.Content = delta.Content
+		}
+		if len(delta.ToolCalls) > 0 {
+			for _, tc := range delta.ToolCalls {
+				sc.ToolCalls = append(sc.ToolCalls, model.ToolCall{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: model.FunctionCall{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				})
+			}
+		}
+		if sc.Content != "" || len(sc.ToolCalls) > 0 {
+			onChunk(sc)
+		}
+	}
+
+	return scanner.Err()
+}
+
+// streamResponse SSE stream 响应结构
+type streamResponse struct {
+	Choices []streamChoice `json:"choices"`
+}
+
+type streamChoice struct {
+	Delta        streamDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
+}
+
+type streamDelta struct {
+	Role      string           `json:"role,omitempty"`
+	Content   string           `json:"content,omitempty"`
+	ToolCalls []streamToolCall `json:"tool_calls,omitempty"`
+}
+
+type streamToolCall struct {
+	Index    int                `json:"index"`
+	ID       string             `json:"id,omitempty"`
+	Type     string             `json:"type,omitempty"`
+	Function streamFunctionCall `json:"function,omitempty"`
+}
+
+type streamFunctionCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }

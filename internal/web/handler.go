@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"myagent/internal/agent"
 	"myagent/internal/logger"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -33,9 +35,10 @@ type clientMessage struct {
 
 // Server Web 服务
 type Server struct {
-	manager  *agent.Manager
-	addr     string
-	basePath string
+	manager        *agent.Manager
+	sessionManager *agent.SessionManager
+	addr           string
+	basePath       string
 }
 
 // NewServer 创建 Web 服务
@@ -44,7 +47,12 @@ func NewServer(manager *agent.Manager, addr string, basePath string) *Server {
 	if basePath != "" && !strings.HasPrefix(basePath, "/") {
 		basePath = "/" + basePath
 	}
-	return &Server{manager: manager, addr: addr, basePath: basePath}
+	return &Server{
+		manager:        manager,
+		sessionManager: agent.NewSessionManager(),
+		addr:           addr,
+		basePath:       basePath,
+	}
 }
 
 // Start 启动 HTTP 服务
@@ -67,6 +75,22 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc(s.basePath+"/ws", s.handleWS)
 
 	srv := &http.Server{Addr: s.addr, Handler: mux}
+
+	// 定期清理过期会话（1小时未活跃）
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if count := s.sessionManager.CleanExpired(1 * time.Hour); count > 0 {
+					logger.Infof("清理了 %d 个过期会话", count)
+				}
+			}
+		}
+	}()
 
 	go func() {
 		<-ctx.Done()
@@ -175,7 +199,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logger.Infof("WebSocket 客户端连接: %s -> agent=%s", r.RemoteAddr, agentID)
+	// 为每个 WebSocket 连接创建独立会话
+	sessionID := uuid.New().String()
+	session := s.sessionManager.Create(sessionID, agentID, ag.GetSystemPrompt(), ag.GetMaxTokens())
+	defer s.sessionManager.Delete(sessionID)
+
+	logger.Infof("WebSocket 客户端连接: %s -> agent=%s, session=%s", r.RemoteAddr, agentID, sessionID)
 
 	var writeMu sync.Mutex
 	wsWriteJSON := func(v interface{}) {
@@ -201,14 +230,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "clear":
-			ag.ClearHistory()
+			session.Clear()
 			wsWriteJSON(agent.Event{Type: agent.EventAssistant, Content: "对话历史已清空。"})
 
 		case "message":
 			if msg.Content == "" {
 				continue
 			}
-			_, err := ag.ChatWithEvents(r.Context(), msg.Content, func(e agent.Event) {
+			// 使用流式会话对话
+			_, err := ag.ChatSessionStream(r.Context(), session, msg.Content, func(e agent.Event) {
 				wsWriteJSON(e)
 			})
 			if err != nil {

@@ -9,15 +9,16 @@ import (
 
 // 默认值常量
 const (
-	DefaultModel       = "gpt-4o"
-	DefaultBaseURL     = "https://api.openai.com/v1"
-	DefaultMaxTurns    = 10
-	DefaultMaxHistory  = 50
-	DefaultLogDir      = "log"
-	DefaultLogLevel       = "INFO"
-	DefaultWebAddr     = ":8080"
-	DefaultWebBasePath = "/myagent"
-	DefaultSystemPrompt   = "你是一个有用的 AI 助手。请用简洁、准确的方式回答问题。"
+	DefaultModel        = "gpt-4o"
+	DefaultBaseURL      = "https://api.openai.com/v1"
+	DefaultMaxTurns     = 10
+	DefaultMaxHistory   = 50
+	DefaultMaxTokens    = 4096
+	DefaultLogDir       = "log"
+	DefaultLogLevel     = "INFO"
+	DefaultWebAddr      = ":8080"
+	DefaultWebBasePath  = "/myagent"
+	DefaultSystemPrompt = "你是一个有用的 AI 助手。请用简洁、准确的方式回答问题。"
 )
 
 // Config 应用配置

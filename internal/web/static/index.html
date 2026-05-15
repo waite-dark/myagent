@@ -943,6 +943,8 @@
   let agents = [];
   let allTools = [];
   let editingId = null;
+  let streamingBubble = null; // 流式输出的气泡元素
+  let streamContent = '';     // 流式输出累积内容
 
   let reconnectTimer = null;
   let reconnectAttempt = 0;
@@ -1122,20 +1124,75 @@
         showThinking(); break;
       case 'tool_call':
         removeThinking();
+        endStreamBubble();
         addToolCard('call', ev.name, ev.args);
         showThinking(); break;
       case 'tool_result':
         removeThinking();
         addToolCard('result', ev.name, ev.result);
         showThinking(); break;
+      case 'stream':
+        removeThinking();
+        appendStream(ev.content);
+        break;
+      case 'stream_end':
+        removeThinking();
+        endStreamBubble();
+        busy = false; sendBtn.disabled = false; input.focus(); break;
       case 'assistant':
         removeThinking();
+        endStreamBubble();
         addMessage('assistant', ev.content);
         busy = false; sendBtn.disabled = false; input.focus(); break;
       case 'error':
         removeThinking();
+        endStreamBubble();
         addMessage('error', ev.content);
         busy = false; sendBtn.disabled = false; input.focus(); break;
+    }
+  }
+
+  // 流式输出：逐步追加内容到当前气泡
+  function appendStream(text) {
+    if (!streamingBubble) {
+      // 创建新的 assistant 消息气泡
+      const wrapper = document.createElement('div');
+      wrapper.className = 'msg-wrapper assistant';
+      const avatar = document.createElement('div');
+      avatar.className = 'msg-avatar';
+      avatar.textContent = '✨';
+      const content = document.createElement('div');
+      content.className = 'msg-content';
+      const header = document.createElement('div');
+      header.className = 'msg-header';
+      header.innerHTML = '<span class="msg-name">AI</span><span class="msg-time">' + timeNow() + '</span>';
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble md-rendered';
+      content.appendChild(header);
+      content.appendChild(bubble);
+      wrapper.appendChild(avatar);
+      wrapper.appendChild(content);
+      chat.appendChild(wrapper);
+      streamingBubble = bubble;
+      streamContent = '';
+    }
+    streamContent += text;
+    if (typeof marked !== 'undefined') {
+      streamingBubble.innerHTML = marked.parse(streamContent);
+    } else {
+      streamingBubble.textContent = streamContent;
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function endStreamBubble() {
+    if (streamingBubble) {
+      // 最终渲染一次，确保 markdown 完整
+      if (typeof marked !== 'undefined' && streamContent) {
+        streamingBubble.innerHTML = marked.parse(streamContent);
+      }
+      streamingBubble = null;
+      streamContent = '';
     }
   }
 

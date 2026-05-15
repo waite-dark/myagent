@@ -41,6 +41,7 @@ type ChatRequest struct {
 	Model    string           `json:"model"`
 	Messages []Message        `json:"messages"`
 	Tools    []ToolDefinition `json:"tools,omitempty"`
+	Stream   bool             `json:"stream,omitempty"`
 }
 
 // ChatResponse 聊天响应
