@@ -28,6 +28,14 @@ type Config struct {
 	Agents []PresetAgentConfig `json:"agents"`
 	Log    LogConfig           `json:"log"`
 	Web    WebConfig           `json:"web"`
+	RAG    RAGConfig           `json:"rag"`
+}
+
+// RAGConfig RAG 知识库服务配置（外部 FastAPI 服务）
+type RAGConfig struct {
+	Enable  bool   `json:"enable"`   // 是否启用 rag_search 工具
+	BaseURL string `json:"base_url"` // RAG 服务地址
+	TopK    int    `json:"top_k"`    // 默认检索片段数量
 }
 
 // WebConfig Web 服务配置
@@ -89,6 +97,11 @@ func Load() (*Config, error) {
 			Enable:   true,
 			Addr:     DefaultWebAddr,
 			BasePath: DefaultWebBasePath,
+		},
+		RAG: RAGConfig{
+			Enable:  false,
+			BaseURL: "http://127.0.0.1:8000",
+			TopK:    4,
 		},
 	}
 

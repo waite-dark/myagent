@@ -228,8 +228,9 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, messages []model.Message,
 		if len(delta.ToolCalls) > 0 {
 			for _, tc := range delta.ToolCalls {
 				sc.ToolCalls = append(sc.ToolCalls, model.ToolCall{
-					ID:   tc.ID,
-					Type: tc.Type,
+					Index: tc.Index,
+					ID:    tc.ID,
+					Type:  tc.Type,
 					Function: model.FunctionCall{
 						Name:      tc.Function.Name,
 						Arguments: tc.Function.Arguments,

@@ -47,6 +47,9 @@ func main() {
 	registry.Register(tool.NewTimeTool())
 	registry.Register(tool.NewHTTPTool())
 	registry.Register(tool.NewCalcTool())
+	if cfg.RAG.Enable {
+		registry.Register(tool.NewRAGTool(cfg.RAG.BaseURL, cfg.RAG.TopK))
+	}
 
 	// 创建 Agent 管理器
 	llmBase := llm.ClientConfig{

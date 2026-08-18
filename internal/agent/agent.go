@@ -461,11 +461,14 @@ func (a *Agent) summarizeMessages(ctx context.Context, messages []model.Message)
 }
 
 // mergeToolCalls 合并流式返回的 tool call 增量
+// OpenAI 兼容协议中，流式 tool_calls 按 index 分片到达：
+//   首个分片携带 id/type/name，后续分片只携带 index + arguments 片段（id/type/name 为空）。
+// 因此必须按 index 匹配增量，而不能按 id 匹配（否则后续分片会被当成新的独立 tool call）。
 func mergeToolCalls(existing []model.ToolCall, deltas []model.ToolCall) []model.ToolCall {
 	for _, d := range deltas {
 		found := false
 		for i := range existing {
-			if existing[i].ID == d.ID || (existing[i].ID == "" && i == len(existing)-1 && d.ID == "") {
+			if existing[i].Index == d.Index {
 				existing[i].Function.Arguments += d.Function.Arguments
 				if d.Function.Name != "" {
 					existing[i].Function.Name = d.Function.Name
@@ -482,6 +485,13 @@ func mergeToolCalls(existing []model.ToolCall, deltas []model.ToolCall) []model.
 		}
 		if !found {
 			existing = append(existing, d)
+		}
+	}
+
+	// 兜底：确保每个 tool call 都有合法的 type（OpenAI 协议要求 "function"）
+	for i := range existing {
+		if existing[i].Type == "" {
+			existing[i].Type = "function"
 		}
 	}
 	return existing

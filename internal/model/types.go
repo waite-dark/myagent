@@ -15,6 +15,8 @@ type ToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
+	// Index 流式增量序号（OpenAI 兼容协议用 index 定位增量），仅内部合并用，不参与序列化
+	Index int `json:"-"`
 }
 
 // FunctionCall 函数调用详情

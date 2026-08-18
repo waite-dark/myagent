@@ -30,3 +30,13 @@ Thumbs.db
 # Test
 *.test
 coverage.out
+
+# Local Go build cache (used when system cache is sandboxed)
+.gocache/
+.gopath/
+
+# RAG service runtime data
+KnowledgeBase-RAG-LLM-System/chroma_db/
+KnowledgeBase-RAG-LLM-System/md5.text
+KnowledgeBase-RAG-LLM-System/chat_history/
+KnowledgeBase-RAG-LLM-System/__pycache__/
