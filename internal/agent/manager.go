@@ -168,6 +168,13 @@ func (m *Manager) AllToolNames() []string {
 	return names
 }
 
+// GetLLMBase 获取 LLM 基础配置
+func (m *Manager) GetLLMBase() llm.ClientConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.llmBase
+}
+
 // buildAgent 内部方法：创建 Agent 实例（调用方须持有锁）
 func (m *Manager) buildAgent(cfg *AgentConfig) error {
 	if cfg.ID == "" {

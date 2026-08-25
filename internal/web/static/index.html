@@ -298,6 +298,11 @@
     color: #ff6b6b;
     background: rgba(255,100,100,0.08);
   }
+  .btn-clear.active {
+    background: rgba(124,106,255,0.15);
+    border-color: rgba(124,106,255,0.4);
+    color: var(--primary-light);
+  }
 
   /* 未选择 Agent 的占位 */
   .no-agent {
@@ -864,6 +869,7 @@
         </div>
       </div>
       <div class="header-actions">
+        <button class="btn-clear" id="routeToggle" onclick="toggleRouteMode()" title="多 Agent 编排路由">🔀 路由</button>
         <button class="btn-clear" onclick="clearChat()">🗑 清空对话</button>
       </div>
     </header>
@@ -949,6 +955,30 @@
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let intentionalClose = false;
+  let routeMode = false;  // 是否启用编排路由模式
+
+  // 路由模式切换
+  window.toggleRouteMode = function() {
+    routeMode = !routeMode;
+    $('routeToggle').classList.toggle('active', routeMode);
+    $('routeToggle').textContent = routeMode ? '🔀 路由中' : '🔀 路由';
+    if (routeMode) {
+      // 路由模式：自动选择编排器
+      headerTitle.textContent = 'MyClaw AI (路由模式)';
+      noAgent.style.display = 'none';
+      chat.style.display = 'flex';
+      chat.innerHTML = '';
+      inputArea.style.display = 'block';
+      renderAgentList();
+      clearTimeout(reconnectTimer);
+      intentionalClose = true;
+      connectWS('__orchestrator__');
+      intentionalClose = false;
+    } else if (currentAgentId) {
+      // 切回普通模式，重新连接当前 Agent
+      selectAgent(currentAgentId);
+    }
+  };
   // ===== Markdown 配置 =====
   if (typeof marked !== 'undefined') {
     const renderer = new marked.Renderer();
@@ -1088,7 +1118,11 @@
     removeThinking();
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + BASE_PATH + '/ws?agent=' + encodeURIComponent(agentId));
+    let url = proto + '//' + location.host + BASE_PATH + '/ws?agent=' + encodeURIComponent(agentId);
+    if (routeMode) {
+      url += '&route=true';
+    }
+    ws = new WebSocket(url);
 
     ws.onopen = () => {
       statusDot.classList.add('connected');
@@ -1120,6 +1154,12 @@
 
   function handleEvent(ev) {
     switch (ev.type) {
+      case 'route':
+        // 路由事件：显示当前请求被路由到哪个 Agent
+        removeThinking();
+        endStreamBubble();
+        addRouteCard(ev.content);
+        break;
       case 'thinking':
         showThinking(); break;
       case 'tool_call':
@@ -1248,6 +1288,23 @@
         '</summary>' +
         '<div class="tool-detail-body">' + esc(detail) + '</div>' +
       '</details>';
+    chat.appendChild(card);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  // 路由卡片：显示当前请求被路由到哪个 Agent
+  function addRouteCard(agentID) {
+    const ag = agents.find(a => a.id === agentID);
+    const name = ag ? (ag.name || ag.id) : agentID;
+    const card = document.createElement('div');
+    card.className = 'tool-card';
+    card.innerHTML =
+      '<div class="tool-detail" style="border-color:rgba(124,106,255,0.3);background:rgba(124,106,255,0.04);">' +
+        '<div style="padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);">' +
+          '<span style="font-size:15px;">🔄</span>' +
+          '<span>路由到 <strong style="color:var(--primary-light)">' + esc(name) + '</strong></span>' +
+        '</div>' +
+      '</div>';
     chat.appendChild(card);
     chat.scrollTop = chat.scrollHeight;
   }

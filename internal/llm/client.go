@@ -67,6 +67,11 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 }
 
+// NewOpenAIClientFromBase 从 ClientConfig 创建 OpenAI 客户端（便捷接口）
+func NewOpenAIClientFromBase(cfg ClientConfig) *OpenAIClient {
+	return NewOpenAIClient(cfg)
+}
+
 // Chat 发送聊天请求（含指数退避重试）
 func (c *OpenAIClient) Chat(ctx context.Context, messages []model.Message, tools []model.ToolDefinition) (*model.ChatResponse, error) {
 	reqBody := model.ChatRequest{

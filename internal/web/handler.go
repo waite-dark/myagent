@@ -37,6 +37,7 @@ type clientMessage struct {
 type Server struct {
 	manager        *agent.Manager
 	sessionManager *agent.SessionManager
+	orchestrator   *agent.Orchestrator
 	addr           string
 	basePath       string
 }
@@ -53,6 +54,11 @@ func NewServer(manager *agent.Manager, addr string, basePath string) *Server {
 		addr:           addr,
 		basePath:       basePath,
 	}
+}
+
+// SetOrchestrator 设置编排器（可选）
+func (s *Server) SetOrchestrator(o *agent.Orchestrator) {
+	s.orchestrator = o
 }
 
 // Start 启动 HTTP 服务
@@ -181,14 +187,10 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	agentID := r.URL.Query().Get("agent")
-	if agentID == "" {
-		http.Error(w, "缺少 agent 参数", http.StatusBadRequest)
-		return
-	}
+	useRoute := s.orchestrator != nil && r.URL.Query().Get("route") == "true"
 
-	ag, ok := s.manager.GetAgent(agentID)
-	if !ok {
-		http.Error(w, "agent 不存在", http.StatusNotFound)
+	if agentID == "" && !useRoute {
+		http.Error(w, "缺少 agent 参数", http.StatusBadRequest)
 		return
 	}
 
@@ -201,10 +203,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// 为每个 WebSocket 连接创建独立会话
 	sessionID := uuid.New().String()
-	session := s.sessionManager.Create(sessionID, agentID, ag.GetSystemPrompt(), ag.GetMaxTokens())
-	defer s.sessionManager.Delete(sessionID)
+	var session *agent.Session
 
-	logger.Infof("WebSocket 客户端连接: %s -> agent=%s, session=%s", r.RemoteAddr, agentID, sessionID)
+	if useRoute {
+		// 路由模式：使用编排器，默认 system prompt
+		session = s.sessionManager.Create(sessionID, "__orchestrator__", "编排器路由", 0)
+	} else {
+		ag, ok := s.manager.GetAgent(agentID)
+		if !ok {
+			http.Error(w, "agent 不存在", http.StatusNotFound)
+			return
+		}
+		session = s.sessionManager.Create(sessionID, agentID, ag.GetSystemPrompt(), ag.GetMaxTokens())
+	}
+
+	defer s.sessionManager.Delete(sessionID)
+	logger.Infof("WebSocket 客户端连接: %s -> agent=%s, session=%s, route=%v", r.RemoteAddr, agentID, sessionID, useRoute)
 
 	var writeMu sync.Mutex
 	wsWriteJSON := func(v interface{}) {
@@ -237,12 +251,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.Content == "" {
 				continue
 			}
-			// 使用流式会话对话
-			_, err := ag.ChatSessionStream(r.Context(), session, msg.Content, func(e agent.Event) {
-				wsWriteJSON(e)
-			})
-			if err != nil {
-				wsWriteJSON(agent.Event{Type: agent.EventError, Content: err.Error()})
+
+			if useRoute && s.orchestrator != nil {
+				// 编排路由模式
+				_, err := s.orchestrator.RouteAndChatWithEvents(r.Context(), msg.Content, session, func(e agent.Event) {
+					wsWriteJSON(e)
+				})
+				if err != nil {
+					wsWriteJSON(agent.Event{Type: agent.EventError, Content: err.Error()})
+				}
+			} else {
+				// 直接 Agent 模式
+				ag, ok := s.manager.GetAgent(agentID)
+				if !ok {
+					wsWriteJSON(agent.Event{Type: agent.EventError, Content: "agent 不存在"})
+					continue
+				}
+				_, err := ag.ChatSessionStream(r.Context(), session, msg.Content, func(e agent.Event) {
+					wsWriteJSON(e)
+				})
+				if err != nil {
+					wsWriteJSON(agent.Event{Type: agent.EventError, Content: err.Error()})
+				}
 			}
 
 		default:

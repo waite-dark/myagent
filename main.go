@@ -91,6 +91,20 @@ func main() {
 		})
 	}
 
+	// 注册 Agent 互调工具
+	if len(manager.ListConfigs()) > 1 {
+		if err := manager.RegisterAgentCallTools(); err != nil {
+			logger.Warnf("注册 Agent 互调工具失败: %v", err)
+		} else {
+			logger.Infof("已注册 Agent 互调工具")
+		}
+	}
+
+	// 创建编排器（多 Agent 路由）
+	orchestrator := agent.NewOrchestrator(manager, agent.RouterConfig{
+		Type: agent.RouterFirstMatch, // 默认使用名称匹配路由
+	})
+
 	// 退出
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -106,6 +120,7 @@ func main() {
 	// 启动 Web 服务
 	if cfg.Web.Enable {
 		webSrv := web.NewServer(manager, cfg.Web.Addr, cfg.Web.BasePath)
+		webSrv.SetOrchestrator(orchestrator)
 		go func() {
 			if err := webSrv.Start(ctx); err != nil {
 				logger.Errorf("Web 服务错误: %v", err)

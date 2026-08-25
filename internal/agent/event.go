@@ -11,6 +11,7 @@ const (
 	EventStream     EventType = "stream"     // 流式输出增量
 	EventStreamEnd  EventType = "stream_end" // 流式输出结束
 	EventError      EventType = "error"
+	EventRoute      EventType = "route" // 路由事件：通知前端当前请求被路由到哪个 Agent
 )
 
 // Event Agent 事件
